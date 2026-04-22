@@ -1,0 +1,183 @@
+@startuml Travel Planner Data Flow
+
+title Data Flow: "I'm planning a trip to Tokyo, what's the weather and time there?"
+
+actor User
+participant "Browser\n(Streamlit UI)" as Browser
+participant "Streamlit\nApp (app.py)" as App
+participant "PydanticAI\nAgent" as Agent
+participant "LLM API\n(OpenAI-compatible)" as LLM
+participant "travel_planner\n(Tool)" as TravelTool
+participant "web_search\n(Tool)" as WebSearch
+participant "get_datetime_info\n(Tool)" as DateTimeTool
+participant "unit_converter\n(Tool)" as UnitTool
+
+== Initialization (on app startup) ==
+
+App -> App : load_skills("SKILLS.md")
+note right
+  Parses 6 skills:
+  Web Search, Financial Calculator,
+  Unit Converter, Text Summarizer,
+  Date & Time, Travel Planner
+end note
+App -> App : build_skills_prompt(skills)
+note right
+  Generates system prompt with
+  skill names + instructions
+end note
+
+== Tool Registration (@agent.tool decorators) ==
+
+App -> Agent : @agent.tool web_search()
+note right
+  Registers function signature + docstring:
+  **name:** "web_search"
+  **params:** { "query": "string" }
+  **desc:** "Search the web for current
+  information on any topic."
+end note
+App -> Agent : @agent.tool calculate_growth()
+note right
+  **name:** "calculate_growth"
+  **params:** { "initial": float,
+    "rate": float, "years": int }
+  **desc:** "Calculates compound interest
+  growth. Pro members get a 5% bonus."
+end note
+App -> Agent : @agent.tool unit_converter()
+App -> Agent : @agent.tool summarize_text()
+App -> Agent : @agent.tool get_datetime_info()
+App -> Agent : @agent.tool travel_planner()
+note right
+  **name:** "travel_planner"
+  **params:** { "destination": "string",
+    "home_timezone": int }
+  **desc:** "Plan a trip by gathering
+  weather, local time, and travel info."
+end note
+
+Agent -> Agent : Collects all 6 registered tools\ninto ToolDefinition list
+note right
+  Each @agent.tool decorator converts
+  the Python function into a
+  **ToolDefinition** with:
+  - name (function name)
+  - description (docstring)
+  - parameters_json_schema
+    (auto-generated from type hints)
+
+  This list is sent to the LLM as
+  the **"tools"** field in every
+  /chat/completions request.
+end note
+
+== User Input ==
+
+User -> Browser : Types: "I'm planning a trip to Tokyo,\nwhat's the weather and time there?"
+Browser -> App : st.chat_input() returns prompt
+
+== Agent Invocation ==
+
+App -> App : deps = UserContext(\n  user_name="User",\n  is_pro_member=True\n)
+App -> Agent : agent.run_sync(prompt, deps=deps)
+
+== LLM Request #1: Decide which tool to call ==
+
+Agent -> LLM : POST /chat/completions
+note right
+  **Request:**
+  system: "You are a helpful assistant.\n\n
+  You have the following skills...\n
+  ### Travel Planner\n
+  Help users plan trips by combining
+  weather search, unit conversion,
+  time zone lookup..."
+  user: "I'm planning a trip to Tokyo,
+  what's the weather and time there?"
+  tools: [web_search, calculate_growth,
+  unit_converter, summarize_text,
+  get_datetime_info, travel_planner]
+end note
+
+LLM --> Agent : Tool call response
+note left
+  **Response:**
+  tool_calls: [{
+    name: "travel_planner",
+    arguments: {
+      "destination": "Tokyo",
+      "home_timezone": 8
+    }
+  }]
+end note
+
+== Tool Execution: travel_planner ==
+
+Agent -> TravelTool : travel_planner(\n  destination="Tokyo",\n  home_timezone=8\n)
+
+TravelTool -> TravelTool : Lookup timezone\ntz_map["tokyo"] = 9
+
+TravelTool -> WebSearch : Simulated web_search(\n  "Tokyo weather travel conditions"\n)
+WebSearch --> TravelTool : "Clear skies, 25°C,\ngood travel conditions."
+
+TravelTool -> DateTimeTool : get local time\n  dest_tz=UTC+9, home_tz=UTC+8
+DateTimeTool --> TravelTool : dest: "2026-04-22 17:30 Wednesday"\nhome: "2026-04-22 16:30 Wednesday"
+
+TravelTool -> UnitTool : convert 25°C -> °F
+UnitTool --> TravelTool : 25.0°C = 77.0°F
+
+TravelTool --> Agent : Returns unified briefing
+note right
+  **Tool Result:**
+  "🌍 Travel Briefing: Tokyo
+  ━━━━━━━━━━━━━━━━━━━━━
+  📡 Weather & Conditions:
+     Clear skies, 25°C, good conditions
+  🕐 Time Zones:
+     Tokyo: 2026-04-22 17:30 (UTC+9)
+     Home:  2026-04-22 16:30 (UTC+8)
+     Time difference: 1h ahead
+  🌡️ Temperature:
+     25.0°C = 77.0°F
+  ✅ Travel Readiness: All checks passed!"
+end note
+
+== LLM Request #2: Generate final response ==
+
+Agent -> LLM : POST /chat/completions
+note right
+  **Request:**
+  messages: [
+    ...previous messages...,
+    tool_result: {
+      name: "travel_planner",
+      content: "🌍 Travel Briefing: Tokyo..."
+    }
+  ]
+end note
+
+LLM --> Agent : Final text response
+note left
+  **Response:**
+  "Here's your travel briefing for Tokyo!
+
+  The weather in Tokyo is currently clear
+  with 25°C (77°F). Tokyo is 1 hour ahead
+  of your home timezone.
+
+  🌍 Travel Briefing: Tokyo
+  📡 Clear skies, 25°C
+  🕐 Tokyo 17:30 (UTC+9) vs Home 16:30 (UTC+8)
+  🌡️ 25.0°C = 77.0°F
+  ✅ All checks passed!"
+end note
+
+== Response Display ==
+
+Agent --> App : result.data = "Here's your travel briefing..."
+App -> App : st.session_state.messages.append(\n  {"role": "assistant",\n   "content": response_text}\n)
+App -> Browser : st.markdown(response_text)
+Browser -> User : Displays formatted travel briefing
+
+@enduml
