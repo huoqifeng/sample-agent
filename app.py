@@ -92,12 +92,10 @@ st.title("🤖 PydanticAI Research Assistant")
 # Sidebar for API Key and Settings
 with st.sidebar:
     st.header("Settings")
-    base_url = st.text_input("Base URL", value="http://api.example.com/api/v2")
-    model_name = st.text_input("Model Name", value="Example-750B")
-    api_key = st.text_input("API Key", type="password")
+    base_url = st.text_input("Base URL", value="https://ai.gitee.com/v1")
+    model_name = st.text_input("Model Name", value="Qwen3-8B")
+    api_key = st.text_input("API Key", type="password", help="Optional for free models")
     is_pro = st.checkbox("Pro Member Mode", value=True)
-    if not api_key:
-        st.warning("Please enter your API key to start.")
 
     # Display loaded skills from SKILLS.md
     st.divider()
@@ -120,7 +118,7 @@ class UserContext:
 def get_agent(key: str, base_url: str, model_name: str):
     custom_client = AsyncOpenAI(
         base_url=base_url,
-        api_key=key
+        api_key=key or "EMPTY"
     )
 
     # Pass the client to OpenAIModel via OpenAIProvider
@@ -139,90 +137,89 @@ def get_agent(key: str, base_url: str, model_name: str):
 # Skills are capabilities the agent can invoke via @agent.tool decorators.
 # Each skill is a function that the LLM can call to perform a specific task.
 
-agent = None
-if api_key:
-    agent = get_agent(api_key, base_url, model_name)
+agent = get_agent(api_key, base_url, model_name)
 
-    # ---- Skill 1: Web Search ----
-    @agent.tool
-    async def web_search(ctx: RunContext[UserContext], query: str) -> str:
-        """Search the web for current information on any topic."""
-        return f"Simulated result for '{query}': The weather is 22°C."
+# ---- Skill 1: Web Search ----
+@agent.tool
+async def web_search(ctx: RunContext[UserContext], query: str) -> str:
+    """Search the web for current information on any topic."""
+    return f"Simulated result for '{query}': The weather is 22°C."
 
-    # ---- Skill 2: Compound Interest Calculator ----
-    @agent.tool
-    def calculate_growth(ctx: RunContext[UserContext], initial: float, rate: float, years: int) -> str:
-        """Calculates compound interest growth. Pro members get a 5% bonus."""
-        bonus = 1.05 if ctx.deps.is_pro_member else 1.0
-        result = initial * (rate ** years) * bonus
-        return f"Calculated Value: {result:.2f} (Pro: {ctx.deps.is_pro_member})"
+# ---- Skill 2: Compound Interest Calculator ----
+@agent.tool
+def calculate_growth(ctx: RunContext[UserContext], initial: float, rate: float, years: int) -> str:
+    """Calculates compound interest growth. Pro members get a 5% bonus."""
+    bonus = 1.05 if ctx.deps.is_pro_member else 1.0
+    result = initial * (rate ** years) * bonus
+    return f"Calculated Value: {result:.2f} (Pro: {ctx.deps.is_pro_member})"
 
-    # ---- Skill 3: Unit Converter ----
-    @agent.tool
-    def unit_converter(ctx: RunContext[UserContext], value: float, from_unit: str, to_unit: str) -> str:
-        """Convert between common units of measurement.
+# ---- Skill 3: Unit Converter ----
+@agent.tool
+def unit_converter(ctx: RunContext[UserContext], value: float, from_unit: str, to_unit: str) -> str:
+    """Convert between common units of measurement.
 
-        Supported conversions:
-        - Temperature: celsius <-> fahrenheit
-        - Length: km <-> miles, m <-> feet
-        - Weight: kg <-> lbs
-        """
-        conversions: dict[tuple[str, str], float] = {
-            ('celsius', 'fahrenheit'): lambda v: v * 9 / 5 + 32,
-            ('fahrenheit', 'celsius'): lambda v: (v - 32) * 5 / 9,
-            ('km', 'miles'): lambda v: v * 0.621371,
-            ('miles', 'km'): lambda v: v / 0.621371,
-            ('m', 'feet'): lambda v: v * 3.28084,
-            ('feet', 'm'): lambda v: v / 3.28084,
-            ('kg', 'lbs'): lambda v: v * 2.20462,
-            ('lbs', 'kg'): lambda v: v / 2.20462,
-        }
-        key = (from_unit.lower(), to_unit.lower())
-        if key in conversions:
-            result = conversions[key](value)
-            return f"{value} {from_unit} = {result:.2f} {to_unit}"
-        return f"Unsupported conversion: {from_unit} -> {to_unit}. Supported: celsius/fahrenheit, km/miles, m/feet, kg/lbs"
+    Supported conversions:
+    - Temperature: celsius <-> fahrenheit
+    - Length: km <-> miles, m <-> feet
+    - Weight: kg <-> lbs
+    """
+    conversions: dict[tuple[str, str], float] = {
+        ('celsius', 'fahrenheit'): lambda v: v * 9 / 5 + 32,
+        ('fahrenheit', 'celsius'): lambda v: (v - 32) * 5 / 9,
+        ('km', 'miles'): lambda v: v * 0.621371,
+        ('miles', 'km'): lambda v: v / 0.621371,
+        ('m', 'feet'): lambda v: v * 3.28084,
+        ('feet', 'm'): lambda v: v / 3.28084,
+        ('kg', 'lbs'): lambda v: v * 2.20462,
+        ('lbs', 'kg'): lambda v: v / 2.20462,
+    }
+    key = (from_unit.lower(), to_unit.lower())
+    if key in conversions:
+        result = conversions[key](value)
+        return f"{value} {from_unit} = {result:.2f} {to_unit}"
+    return f"Unsupported conversion: {from_unit} -> {to_unit}. Supported: celsius/fahrenheit, km/miles, m/feet, kg/lbs"
 
-    # ---- Skill 4: Text Summarizer ----
-    @agent.tool
-    def summarize_text(ctx: RunContext[UserContext], text: str, max_sentences: int = 3) -> str:
-        """Summarize a given text by extracting the first N sentences.
+# ---- Skill 4: Text Summarizer ----
+@agent.tool
+def summarize_text(ctx: RunContext[UserContext], text: str, max_sentences: int = 3) -> str:
+    """Summarize a given text by extracting the first N sentences.
 
-        Args:
-            text: The text to summarize.
-            max_sentences: Maximum number of sentences to include (default: 3).
-        """
-        sentences = [s.strip() for s in text.replace('!', '.').replace('?', '.').split('.') if s.strip()]
-        summary = '. '.join(sentences[:max_sentences]) + '.'
-        return f"Summary ({len(sentences[:max_sentences])}/{len(sentences)} sentences): {summary}"
+    Args:
+        text: The text to summarize.
+        max_sentences: Maximum number of sentences to include (default: 3).
+    """
+    sentences = [s.strip() for s in text.replace('!', '.').replace('?', '.').split('.') if s.strip()]
+    summary = '. '.join(sentences[:max_sentences]) + '.'
+    return f"Summary ({len(sentences[:max_sentences])}/{len(sentences)} sentences): {summary}"
 
-    # ---- Skill 5: Date & Time Info ----
-    @agent.tool
-    def get_datetime_info(ctx: RunContext[UserContext], timezone_offset: int = 8) -> str:
-        """Get the current date and time information.
+# ---- Skill 5: Date & Time Info ----
+@agent.tool
+def get_datetime_info(ctx: RunContext[UserContext], timezone_offset: int = 8) -> str:
+    """Get the current date and time information.
 
-        Args:
-            timezone_offset: UTC offset in hours (default: 8 for CST/Beijing).
-        """
-        from datetime import datetime, timedelta, timezone
-        tz = timezone(timedelta(hours=timezone_offset))
-        now = datetime.now(tz)
-        return (
-            f"Current Time (UTC{'+' if timezone_offset >= 0 else ''}{timezone_offset}): "
-            f"{now.strftime('%Y-%m-%d %H:%M:%S')} | "
-            f"Day of week: {now.strftime('%A')} | "
-            f"Day of year: {now.timetuple().tm_yday}"
-        )
+    Args:
+        timezone_offset: UTC offset in hours (default: 8 for CST/Beijing).
+    """
+    from datetime import datetime, timedelta, timezone
+    tz = timezone(timedelta(hours=timezone_offset))
+    now = datetime.now(tz)
+    return (
+        f"Current Time (UTC{'+' if timezone_offset >= 0 else ''}{timezone_offset}): "
+        f"{now.strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"Day of week: {now.strftime('%A')} | "
+        f"Day of year: {now.timetuple().tm_yday}"
+    )
 
-    # ---- Skill 6: Travel Planner (multi-tool skill) ----
-    @agent.tool
-    async def travel_planner(ctx: RunContext[UserContext], destination: str, home_timezone: int = 8) -> str:
+# ---- Skill 6: Travel Planner (multi-tool skill) ----
+@agent.tool
+async def travel_planner(ctx: RunContext[UserContext], destination: str, home_timezone: int = 8) -> str:
         """Plan a trip by gathering weather, local time, and travel info for a destination.
 
         This skill combines multiple tools into one travel briefing:
         - Searches for current weather and travel conditions
         - Shows destination local time vs home time
         - Converts temperature between celsius and fahrenheit
+        - Plane ticket information and price compare
         - Provides a travel readiness summary
 
         Args:
@@ -261,6 +258,29 @@ if api_key:
         temp_c = 25.0  # from simulated weather
         temp_f = temp_c * 9 / 5 + 32
 
+        # --- Tool 4: Plane ticket information and price compare ---
+        import random
+        airlines = ['Air China', 'China Eastern', 'China Southern', 'United Airlines', 'Delta Airlines']
+        ticket_info = []
+        for airline in random.sample(airlines, k=min(3, len(airlines))):
+            price = random.randint(800, 3500)
+            duration_h = random.randint(2, 16)
+            duration_m = random.choice([0, 15, 30, 45])
+            stops = random.choice([0, 0, 1, 1, 2])
+            stop_label = 'Direct' if stops == 0 else f'{stops} stop{"s" if stops > 1 else ""}'
+            ticket_info.append({
+                'airline': airline,
+                'price': price,
+                'duration': f'{duration_h}h {duration_m}m',
+                'stops': stop_label,
+            })
+        ticket_info.sort(key=lambda x: x['price'])
+        cheapest = ticket_info[0]
+        ticket_lines = '\n'.join(
+            f"   {'👑 ' if t == cheapest else '   '}{t['airline']:<20} ${t['price']:<8} {t['duration']:<8} {t['stops']}"
+            for t in ticket_info
+        )
+
         # --- Build unified travel briefing ---
         briefing = f"""🌍 Travel Briefing: {destination}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -275,6 +295,12 @@ if api_key:
 
 🌡️ Temperature:
    {temp_c}°C = {temp_f:.1f}°F
+
+✈️ Plane Tickets (sorted by price):
+   {"Airline":<20} {"Price":<8} {"Duration":<8} Stops
+   {"─" * 50}
+{ticket_lines}
+   💡 Best deal: {cheapest['airline']} at ${cheapest['price']}
 
 ✅ Travel Readiness: All checks passed!"""
 
@@ -291,29 +317,26 @@ for msg in st.session_state.messages:
 
 # User Input
 if prompt := st.chat_input("Ask me anything (e.g., 'Search for weather and calc $1000 growth')"):
-    if not api_key:
-        st.error("Missing API Key!")
-    else:
-        # Add user message to UI
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Add user message to UI
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-        # Generate Agent Response
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    # Initialize context
-                    deps = UserContext(user_name="User", is_pro_member=is_pro)
-                    
-                    # Run the agent (using run_sync for Streamlit compatibility)
-                    result = agent.run_sync(prompt, deps=deps)
-                    
-                    response_text = result.data
-                    st.markdown(response_text)
-                    st.session_state.messages.append({"role": "assistant", "content": response_text})
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
+    # Generate Agent Response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                # Initialize context
+                deps = UserContext(user_name="User", is_pro_member=is_pro)
+                
+                # Run the agent (using run_sync for Streamlit compatibility)
+                result = agent.run_sync(prompt, deps=deps)
+                
+                response_text = result.data
+                st.markdown(response_text)
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
 
 
 # brew install pyenv
